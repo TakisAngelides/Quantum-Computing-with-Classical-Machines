@@ -59,6 +59,20 @@ end
 
 function psi_0(N::Int64, d::Int64)::Array{ComplexF64}
 
+    """
+    Prepapes a state in the form |psi> = |0>|0>...|0> where the ... signifies N kets and each ket has d degrees of freedom
+
+    Inputs: 
+
+    N = number of qudits
+
+    d = degrees of freedom per qudit
+
+    Output:
+
+    state = Array with d^N components representing the coefficients of the state |0>...|0>
+    """
+
     state = zeros(ComplexF64, d^N)
     state[1] = 1.0+0.0im
     state = reshape(state, Tuple(d*ones(Int64, N)))
@@ -218,7 +232,30 @@ end
 
 function state_to_mps(state::Array{ComplexF64}, N::Int64)::Vector{Array{ComplexF64}}
 
+    """
+    Translates the coefficients of a quantum state to mps form using SVD, see Schollwock equation (31) onwards.
+
+    Inputs:
+
+    state = coefficients of state to be translated to mps (Array with d^N components)
+
+    N = number of qudits represented by state 
+
+    Output:
+
+    mps = N-vector with each element being an array representing the tensor on a site of the mps, this mps is the representation of the state
+
+    """
+
     mps = Vector{Array{ComplexF64}}(undef, N)
+
+    if N == 1
+        
+        mps[1] = reshape(state, (1, 1, size(state)[1]))
+
+        return mps
+
+    end
 
     for i in 1:N-1
 
@@ -250,7 +287,14 @@ function state_to_mps(state::Array{ComplexF64}, N::Int64)::Vector{Array{ComplexF
 
         state = reshape(state, (length(S), right_indices...))
 
-        if i == 1
+        if i == 1 && N == 2
+
+            mps[i] = reshape(U, (1, size(U)[1], size(U)[2]))
+            mps[i] = permutedims(mps[i], (1,3,2))
+
+            mps[i+1] = reshape(state, (size(state)[1], 1, size(state)[2]))
+
+        elseif i == 1
 
             mps[i] = reshape(U, (1, size(U)[1], size(U)[2]))
             mps[i] = permutedims(mps[i], (1,3,2))
@@ -402,8 +446,138 @@ function gauge_mps!(form::Form, mps::Vector{Array{ComplexF64}}, normalized::Bool
     end
 end
 
+function get_hadamard_mpo(N::Int64, site::Int64)::Vector{Array{ComplexF64}}
 
-mps = state_to_mps(psi_0(2,2),2)
-display(mps)
+    """
+    Return the mpo of the Hadamard operator H = 1/sqrt(2)[1 1; 1 -1] acting on the site specified by the site input.
 
+    Inputs:
 
+    N = number of qubits of circuit
+
+    site = index of qubit on which to act the Hadamard gate
+
+    Output:
+
+    mpo = N-vector with each element being a 4-array representing the tensor on each site of the mpo representing the Hadamard operator acting on a given site
+    """
+
+    @assert(site >= 1 && site <= N, "The site index on which the Hadamard gate will act should be between 1 and N = $(N). The input
+    given as site index was $(site).")
+
+    zero = [0.0 0.0; 0.0 0.0]
+    I = [1.0 0.0; 0.0 1.0]
+    X = [0.0 1.0; 1.0 0.0]
+    Z = [1.0 0.0; 0.0 -1.0]
+    H = (1/sqrt(2))*(X + Z)
+
+    mpo = Vector{Array{ComplexF64}}(undef, N)
+
+    t1 = ones(1, 2, 2, 2)
+    t1[1,1,:,:] = H
+    
+    ti = ones(2, 2, 2, 2)
+    ti[1,1,:,:] = I
+    ti[1,2,:,:] = zero
+    ti[2,1,:,:] = H
+    ti[2,2,:,:] = I
+    
+    tN = ones(2, 1, 2, 2)
+    tN[1,1,:,:] = I
+    tN[2,1,:,:] = H
+
+    t1_not = zeros(1, 2, 2, 2)
+    t1_not[1,2,:,:] = I
+
+    ti_not = zeros(2, 2, 2, 2)
+    ti_not[1,1,:,:] = I
+    ti_not[2,2,:,:] = I
+
+    tN_not = zeros(2,1,2,2)
+    tN_not[1,1,:,:] = I
+
+    if site == 1
+    
+        mpo[1] = t1
+
+    else
+
+        mpo[1] = t1_not
+    
+    end
+
+    if site == N
+
+        mpo[N] = tN
+    
+    else
+
+        mpo[N] = tN_not
+
+    end
+
+    for i in 2:N-1
+
+        if i == site
+        
+            mpo[i] = ti
+
+        else
+
+            mpo[i] = ti_not
+
+        end
+
+    end
+
+    return mpo
+
+end
+
+function act_mpo_on_mps(mpo::Vector{Array{ComplexF64}}, mps::Vector{Array{ComplexF64}})::Vector{Array{ComplexF64}}
+
+    """
+    Act with an mpo on an mps to produce a new mps with increased bond dimension.
+
+    Inputs:
+
+    mpo = the mpo to act on the mps (Vector of Arrays)
+
+    mps = the mps that the mpo will act on (Vector of Arrays)
+
+    Output:
+
+    result = the new mps with increased bond dimension resulting from acting with the mpo input on the mps input
+    """
+    
+    N = length(mps)
+
+    result = Vector{Array{ComplexF64}}(undef, N)
+
+    for i in 1:N
+    
+        tmp = contraction(mpo[i], (4,), mps[i], (3,)) # Does contraction of sigma'_i: W_(b_i-1 b_i sigma_i sigma'_i) M_(a_i-1 a_i sigma'_i) = T_(b_i-1 b_i sigma_i a_i-1 a_i)
+        tmp = permutedims(tmp, (4, 1, 5, 2, 3)) # T_(a_i-1 b_i-1 a_i b_i sigma_i)
+        idx_dims = size(tmp) # returns a tuple of the dimensions of the indices of the tensor T_(a_i-1 b_i-1 a_i b_i sigma_i)
+        result[i] = reshape(tmp, (idx_dims[1]*idx_dims[2], idx_dims[3]*idx_dims[4], idx_dims[5])) # merges the bond indices of i-1 together and the bond indices of i together by reshaping the tensor into having indices of higher dimension 
+
+    end
+
+    return result
+
+end
+
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Prepares a state |00>, acts with a Hadamard gate on the first qubit to take it to the state 0.7|00> + 0.7|10> which is displayed
+
+N = 2
+d = 2
+Hadamard_mpo = get_hadamard_mpo(N, 1)
+state = psi_0(N, d)
+mps = state_to_mps(state, N)
+mps = act_mpo_on_mps(Hadamard_mpo, mps)
+state = mps_to_state(mps, N)
+display(state)
+
+# ---------------------------------------------------------------------------------------------------------------------
