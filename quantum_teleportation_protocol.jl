@@ -446,20 +446,56 @@ function gauge_mps!(form::Form, mps::Vector{Array{ComplexF64}}, normalized::Bool
     end
 end
 
-function get_hadamard_mpo(N::Int64, site::Int64)::Vector{Array{ComplexF64}}
+function act_mpo_on_mps(mpo::Vector{Array{ComplexF64}}, mps::Vector{Array{ComplexF64}})::Vector{Array{ComplexF64}}
 
     """
-    Return the mpo of the Hadamard operator H = 1/sqrt(2)[1 1; 1 -1] acting on the site specified by the site input.
+    Act with an mpo on an mps to produce a new mps with increased bond dimension.
 
     Inputs:
 
-    N = number of qubits of circuit
+    mpo = the mpo to act on the mps (Vector of Arrays)
 
-    site = index of qubit on which to act the Hadamard gate
+    mps = the mps that the mpo will act on (Vector of Arrays)
 
     Output:
 
-    mpo = N-vector with each element being a 4-array representing the tensor on each site of the mpo representing the Hadamard operator acting on a given site
+    result = the new mps with increased bond dimension resulting from acting with the mpo input on the mps input
+    """
+    
+    N = length(mps)
+
+    result = Vector{Array{ComplexF64}}(undef, N)
+
+    for i in 1:N
+    
+        tmp = contraction(mpo[i], (4,), mps[i], (3,)) # Does contraction of sigma'_i: W_(b_i-1 b_i sigma_i sigma'_i) M_(a_i-1 a_i sigma'_i) = T_(b_i-1 b_i sigma_i a_i-1 a_i)
+        tmp = permutedims(tmp, (4, 1, 5, 2, 3)) # T_(a_i-1 b_i-1 a_i b_i sigma_i)
+        idx_dims = size(tmp) # returns a tuple of the dimensions of the indices of the tensor T_(a_i-1 b_i-1 a_i b_i sigma_i)
+        result[i] = reshape(tmp, (idx_dims[1]*idx_dims[2], idx_dims[3]*idx_dims[4], idx_dims[5])) # merges the bond indices of i-1 together and the bond indices of i together by reshaping the tensor into having indices of higher dimension 
+
+    end
+
+    return result
+
+end
+
+function get_single_qubit_gate_mpo(operator::Matrix{ComplexF64}, N::Int64, site::Int64)::Vector{Array{ComplexF64}}
+
+    """
+    Give it a single qubit gate operator as a matrix and it returns the mpo corresponding to that operator acting on qubit on site
+    with index value site.
+
+    Inputs:
+
+    operator = the single qubit gate operator to act on qubit of index site (matrix)
+
+    N = number of qubits
+
+    site = index of site of qubit we want to act on with the operator
+
+    Output:
+
+    mpo = the mpo corresponding tot he operator input representing a single qubit gate 
     """
 
     @assert(site >= 1 && site <= N, "The site index on which the Hadamard gate will act should be between 1 and N = $(N). The input
@@ -467,24 +503,21 @@ function get_hadamard_mpo(N::Int64, site::Int64)::Vector{Array{ComplexF64}}
 
     zero = [0.0 0.0; 0.0 0.0]
     I = [1.0 0.0; 0.0 1.0]
-    X = [0.0 1.0; 1.0 0.0]
-    Z = [1.0 0.0; 0.0 -1.0]
-    H = (1/sqrt(2))*(X + Z)
 
     mpo = Vector{Array{ComplexF64}}(undef, N)
 
     t1 = ones(1, 2, 2, 2)
-    t1[1,1,:,:] = H
+    t1[1,1,:,:] = operator
     
     ti = ones(2, 2, 2, 2)
     ti[1,1,:,:] = I
     ti[1,2,:,:] = zero
-    ti[2,1,:,:] = H
+    ti[2,1,:,:] = operator
     ti[2,2,:,:] = I
     
     tN = ones(2, 1, 2, 2)
     tN[1,1,:,:] = I
-    tN[2,1,:,:] = H
+    tN[2,1,:,:] = operator
 
     t1_not = zeros(1, 2, 2, 2)
     t1_not[1,2,:,:] = I
@@ -532,38 +565,158 @@ function get_hadamard_mpo(N::Int64, site::Int64)::Vector{Array{ComplexF64}}
 
     return mpo
 
+
 end
 
-function act_mpo_on_mps(mpo::Vector{Array{ComplexF64}}, mps::Vector{Array{ComplexF64}})::Vector{Array{ComplexF64}}
+function get_CNOT_mpo(N::Int64, control_site::Int64, target_site::Int64)::Vector{Array{ComplexF64}}
 
-    """
-    Act with an mpo on an mps to produce a new mps with increased bond dimension.
+    mpo = Vector{Array{ComplexF64}}(undef, N)
 
-    Inputs:
+    A = [1.0+0.0im 0.0+0.0im; 0.0+0.0im 0.0+0.0im]
+    B = [0.0+0.0im 0.0+0.0im; 0.0+0.0im 1.0+0.0im]
+    I = [1.0+0.0im 0.0+0.0im; 0.0+0.0im 1.0+0.0im]
+    X = [0.0+0.0im 1.0+0.0im; 1.0+0.0im 0.0+0.0im]
 
-    mpo = the mpo to act on the mps (Vector of Arrays)
+    t_i_control = zeros(ComplexF64, 4, 4, 2, 2)
+    t_i_control[3,1,:,:] = B
+    t_i_control[4,1,:,:] = A
+    t_i_control[4,2,:,:] = B
 
-    mps = the mps that the mpo will act on (Vector of Arrays)
-
-    Output:
-
-    result = the new mps with increased bond dimension resulting from acting with the mpo input on the mps input
-    """
+    t_i_target = zeros(ComplexF64, 4, 4, 2, 2)
+    t_i_target[1,1,:,:] = I
+    t_i_target[2,1,:,:] = X
+    t_i_target[2,2,:,:] = I
+    t_i_target[3,3,:,:] = I
+    t_i_target[4,3,:,:] = X
+    t_i_target[4,4,:,:] = I 
     
-    N = length(mps)
+    t_i_not = zeros(ComplexF64, 4, 4, 2, 2)
+    t_i_not[1,1,:,:] = I
+    t_i_not[2,2,:,:] = I
+    t_i_not[3,3,:,:] = I
+    t_i_not[4,4,:,:] = I 
 
-    result = Vector{Array{ComplexF64}}(undef, N)
+    t_1_control = zeros(ComplexF64, 1, 4, 2, 2)
+    t_1_control[1,1,:,:] = A
+    t_1_control[1,2,:,:] = B
+
+    t_1_target = zeros(ComplexF64, 1, 4, 2, 2)
+    t_1_target[1,3,:,:] = X
+    t_1_target[1,4,:,:] = I 
+
+    t_1_not = zeros(ComplexF64, 1, 4, 2, 2)
+    t_1_not[1,4,:,:] = I
+
+    t_N_control = zeros(ComplexF64, 4, 1, 2, 2)
+    t_N_control[3,1,:,:] = B
+    t_N_control[4,1,:,:] = A 
+
+    t_N_target = zeros(ComplexF64, 4, 1, 2, 2)
+    t_N_target[1,1,:,:] = I
+    t_N_target[2,1,:,:] = X
+
+    t_N_not = zeros(ComplexF64, 4, 1, 2, 2)
+    t_N_not[1,1,:,:] = I
 
     for i in 1:N
-    
-        tmp = contraction(mpo[i], (4,), mps[i], (3,)) # Does contraction of sigma'_i: W_(b_i-1 b_i sigma_i sigma'_i) M_(a_i-1 a_i sigma'_i) = T_(b_i-1 b_i sigma_i a_i-1 a_i)
-        tmp = permutedims(tmp, (4, 1, 5, 2, 3)) # T_(a_i-1 b_i-1 a_i b_i sigma_i)
-        idx_dims = size(tmp) # returns a tuple of the dimensions of the indices of the tensor T_(a_i-1 b_i-1 a_i b_i sigma_i)
-        result[i] = reshape(tmp, (idx_dims[1]*idx_dims[2], idx_dims[3]*idx_dims[4], idx_dims[5])) # merges the bond indices of i-1 together and the bond indices of i together by reshaping the tensor into having indices of higher dimension 
+        
+        if i == 1
+            
+            if i == control_site
+                mpo[i] = t_1_control
+            elseif i == target_site
+                mpo[i] = t_1_target
+            else
+                mpo[i] = t_1_not
+            end
+        
+        elseif i == N
+            
+            if i == control_site
+                mpo[i] = t_N_control
+            elseif i == target_site
+                mpo[i] = t_N_target
+            else
+                mpo[i] = t_N_not
+            end
 
+        else
+
+            if i == control_site
+                mpo[i] = t_i_control
+            elseif i == target_site
+                mpo[i] = t_i_target
+            else
+                mpo[i] = t_i_not
+            end
+
+        end
+    
     end
 
-    return result
+    return mpo
+
+end
+
+function teleportation_protocol()
+
+    N = 3
+    d = 2
+    
+    state = psi_0(N, d)
+    mps = state_to_mps(state, N) # |000>
+    
+    X = [0.0+0.0im 1.0+0.0im; 1.0+0.0im 0.0+0.0im]
+    Z = [1.0+0.0im 0.0+0.0im; 0.0+0.0im -1.0+0.0im]
+    Hadamard = (1/sqrt(2))*(X + Z)
+    site = 2
+    Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
+    mps = act_mpo_on_mps(Hadamard_mpo, mps) # |0>(0.7|0>+0.7|1>)|0>, note 1/sqrt(2) ~ 0.7
+    
+    target_site = 3
+    control_site = 2
+    CNOT_mpo = get_CNOT_mpo(N, control_site, target_site)
+    mps = act_mpo_on_mps(CNOT_mpo, mps) # |0>0.7(|00>+|11>)
+
+    # For simplicity the state we will teleport is 0.7(|0>+|1>)
+
+    site = 1
+    Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
+    mps = act_mpo_on_mps(Hadamard_mpo, mps) # 0.7(|0>+|1>)0.7(|00>+|11>) this is the state we enter the quantum circuit with 
+
+    # Now we perform the quantum circuit which represents the teleportation protocol
+
+    # CNOT gate
+
+    target_site = 2
+    control_site = 1
+    CNOT_mpo = get_CNOT_mpo(N, control_site, target_site)
+    mps = act_mpo_on_mps(CNOT_mpo, mps) # 0.7(|0>+|1>)0.7(|10>+|01>)
+
+    # Hadamard gate
+
+    site = 1
+    Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
+    mps = act_mpo_on_mps(Hadamard_mpo, mps) # 0.7*0.7(|0>+|1>)0.7(|10>+|01>) + 0.7*0.7(|0>-|1>)0.7(|10>+|01>)
+
+    # Act with the last two gates after reading M1 and M2
+
+    # M1 = 1
+    # M2 = 1
+
+    # site = 3
+    # X_operator = X^M2
+    # X_mpo = get_single_qubit_gate_mpo(X_operator, N, site)
+
+    # Z_operator = Z^M1
+    # Z_mpo = get_single_qubit_gate_mpo(Z_operator, N, site)
+
+    # mps = act_mpo_on_mps(X_mpo, mps)
+    # mps = act_mpo_on_mps(Z_mpo, mps)
+
+    # state = mps_to_state(mps, N)
+
+    return state
 
 end
 
@@ -571,13 +724,39 @@ end
 
 # Prepares a state |00>, acts with a Hadamard gate on the first qubit to take it to the state 0.7|00> + 0.7|10> which is displayed
 
-N = 2
-d = 2
-Hadamard_mpo = get_hadamard_mpo(N, 1)
-state = psi_0(N, d)
-mps = state_to_mps(state, N)
-mps = act_mpo_on_mps(Hadamard_mpo, mps)
-state = mps_to_state(mps, N)
-display(state)
+# N = 2
+# d = 2
+# X = [0.0+0.0im 1.0+0.0im; 1.0+0.0im 0.0+0.0im]
+# Z = [1.0+0.0im 0.0+0.0im; 0.0+0.0im -1.0+0.0im]
+# Hadamard = (1/sqrt(2))*(X + Z)
+# site = 1
+# Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
+# state = psi_0(N, d)
+# mps = state_to_mps(state, N)
+# mps = act_mpo_on_mps(Hadamard_mpo, mps)
+# state = mps_to_state(mps, N)
+# display(state)
+
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Prepares a state |00>, then acts with a Hadamard on site 1 to make it 0.7(|0>+|1>)|0> then acts with a CNOT having
+# site 1 as control and site 2 as target to make it 0.7(|00>+|11>)
+
+# N = 2
+# d = 2
+# site = 1
+# target_site = 2
+# control_site = 1
+# CNOT_mpo = get_CNOT_mpo(N, control_site, target_site)
+# state = psi_0(N, d)
+# mps = state_to_mps(state, N)
+# X = [0.0+0.0im 1.0+0.0im; 1.0+0.0im 0.0+0.0im]
+# Z = [1.0+0.0im 0.0+0.0im; 0.0+0.0im -1.0+0.0im]
+# Hadamard = (1/sqrt(2))*(X + Z)
+# Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
+# mps = act_mpo_on_mps(Hadamard_mpo, mps)
+# mps = act_mpo_on_mps(CNOT_mpo, mps)
+# state = mps_to_state(mps, N)
+# display(state)
 
 # ---------------------------------------------------------------------------------------------------------------------
