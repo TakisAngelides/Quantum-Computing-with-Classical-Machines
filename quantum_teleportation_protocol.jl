@@ -81,6 +81,36 @@ function psi_0(N::Int64, d::Int64)::Array{ComplexF64}
 
 end
 
+function psi_0_teleport(alpha::ComplexF64, beta::ComplexF64)::Array{ComplexF64}
+
+    """
+    Prepapes a state in the form |psi> = (1/sqrt(2))(alpha|0>|0>|0> + alpha|0>|1>|1> + beta|1>|0>|0> + beta|1>|1>|1>)
+
+    Inputs: 
+
+    N = number of qudits
+
+    d = degrees of freedom per qudit
+
+    Output:
+
+    state = Array with d^N components representing the coefficients of the state |psi> = (1/sqrt(2))(alpha|0>|0>|0> + alpha|0>|1>|1> + beta|1>|0>|0> + beta|1>|1>|1>)
+    """
+
+    N = 3
+    d = 2
+
+    state = zeros(ComplexF64, d^N)
+    state = reshape(state, Tuple(d*ones(Int64, N)))
+    state[1,1,1] = (1/sqrt(2))*alpha
+    state[1,2,2] = (1/sqrt(2))*alpha
+    state[2,1,1] = (1/sqrt(2))*beta
+    state[2,2,2] = (1/sqrt(2))*beta
+
+    return state
+
+end
+
 function contraction(A, c_A::Tuple, B, c_B::Tuple)::Array{ComplexF64}
 
     """
@@ -663,26 +693,8 @@ function teleportation_protocol()
     N = 3
     d = 2
     
-    state = psi_0(N, d)
-    mps = state_to_mps(state, N) # |000>
-    
-    X = [0.0+0.0im 1.0+0.0im; 1.0+0.0im 0.0+0.0im]
-    Z = [1.0+0.0im 0.0+0.0im; 0.0+0.0im -1.0+0.0im]
-    Hadamard = (1/sqrt(2))*(X + Z)
-    site = 2
-    Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
-    mps = act_mpo_on_mps(Hadamard_mpo, mps) # |0>(0.7|0>+0.7|1>)|0>, note 1/sqrt(2) ~ 0.7
-    
-    target_site = 3
-    control_site = 2
-    CNOT_mpo = get_CNOT_mpo(N, control_site, target_site)
-    mps = act_mpo_on_mps(CNOT_mpo, mps) # |0>0.7(|00>+|11>)
-
-    # For simplicity the state we will teleport is 0.7(|0>+|1>)
-
-    site = 1
-    Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
-    mps = act_mpo_on_mps(Hadamard_mpo, mps) # 0.7(|0>+|1>)0.7(|00>+|11>) this is the state we enter the quantum circuit with 
+    state = psi_0_teleport(0.5+0.0im, 0.5+0.0im)
+    mps = state_to_mps(state, N)
 
     # Now we perform the quantum circuit which represents the teleportation protocol
 
@@ -691,13 +703,16 @@ function teleportation_protocol()
     target_site = 2
     control_site = 1
     CNOT_mpo = get_CNOT_mpo(N, control_site, target_site)
-    mps = act_mpo_on_mps(CNOT_mpo, mps) # 0.7(|0>+|1>)0.7(|10>+|01>)
+    mps = act_mpo_on_mps(CNOT_mpo, mps) 
 
     # Hadamard gate
 
     site = 1
+    X = [0.0+0.0im 1.0+0.0im; 1.0+0.0im 0.0+0.0im]
+    Z = [1.0+0.0im 0.0+0.0im; 0.0+0.0im -1.0+0.0im]
+    Hadamard = (1/sqrt(2))*(X + Z)
     Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
-    mps = act_mpo_on_mps(Hadamard_mpo, mps) # 0.7*0.7(|0>+|1>)0.7(|10>+|01>) + 0.7*0.7(|0>-|1>)0.7(|10>+|01>)
+    mps = act_mpo_on_mps(Hadamard_mpo, mps) 
 
     # Act with the last two gates after reading M1 and M2
 
@@ -732,6 +747,7 @@ end
 # site = 1
 # Hadamard_mpo = get_single_qubit_gate_mpo(Hadamard, N, site)
 # state = psi_0(N, d)
+# display(state)
 # mps = state_to_mps(state, N)
 # mps = act_mpo_on_mps(Hadamard_mpo, mps)
 # state = mps_to_state(mps, N)
@@ -760,3 +776,4 @@ end
 # display(state)
 
 # ---------------------------------------------------------------------------------------------------------------------
+
