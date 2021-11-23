@@ -111,6 +111,20 @@ function psi_0_teleport(alpha::ComplexF64, beta::ComplexF64)::Array{ComplexF64}
 
 end
 
+function psi_0_superdense_coding()::Array{ComplexF64}
+
+    N = 2
+    d = 2
+
+    state = zeros(ComplexF64, d^N)
+    state = reshape(state, Tuple(d*ones(Int64, N)))
+    state[1,1,] = 1/sqrt(2)
+    state[2,2] = 1/sqrt(2)
+
+    return state
+
+end
+
 function contraction(A, c_A::Tuple, B, c_B::Tuple)::Array{ComplexF64}
 
     """
@@ -509,7 +523,7 @@ function act_mpo_on_mps(mpo::Vector{Array{ComplexF64}}, mps::Vector{Array{Comple
 
 end
 
-function get_single_qubit_gate_mpo(operator::Matrix{ComplexF64}, N::Int64, site::Int64)::Vector{Array{ComplexF64}}
+function get_single_qubit_gate_mpo(operator::Matrix, N::Int64, site::Int64)::Vector{Array{ComplexF64}}
 
     """
     Give it a single qubit gate operator as a matrix and it returns the mpo corresponding to that operator acting on qubit on site
@@ -688,7 +702,7 @@ function get_CNOT_mpo(N::Int64, control_site::Int64, target_site::Int64)::Vector
 
 end
 
-function teleportation_protocol()
+function teleportation_protocol() # TODO: UNFINISHED FUNCTION
 
     N = 3
     d = 2
@@ -730,6 +744,49 @@ function teleportation_protocol()
     # mps = act_mpo_on_mps(Z_mpo, mps)
 
     # state = mps_to_state(mps, N)
+
+    return state
+
+end
+
+function superdense_coding(bit_1::Int64, bit_2::Int64)
+
+    N = 2
+
+    state = psi_0_superdense_coding()
+
+    mps = state_to_mps(state, N)
+
+    I = [1 0;0 1]
+    X = [0 1;1 0]
+    Z = [1 0;0 -1]
+    iY = [0 1;-1 0]
+
+    if bit_1 == 0 && bit_2 == 0
+        operator = I
+    elseif bit_1 == 0 && bit_2 == 1
+        operator = X
+    elseif bit_1 == 1 && bit_2 == 0
+        operator = Z
+    else
+        operator = iY
+    end
+
+    mpo_alice = get_single_qubit_gate_mpo(operator, N, 1)
+
+    mps = act_mpo_on_mps(mpo_alice, mps)
+
+    mpo_bob_cnot = get_CNOT_mpo(N, 1, 2)
+
+    mps = act_mpo_on_mps(mpo_bob_cnot, mps)
+
+    hadamard_operator = (1/sqrt(2))*(X + Z)
+
+    mpo_bob_hadamard = get_single_qubit_gate_mpo(hadamard_operator, N, 1)
+
+    mps = act_mpo_on_mps(mpo_bob_hadamard, mps)
+
+    state = mps_to_state(mps, N)
 
     return state
 
@@ -777,3 +834,8 @@ end
 
 # ---------------------------------------------------------------------------------------------------------------------
 
+# Superdense coding 2 bits
+
+# display(superdense_coding(0, 1))
+
+# ---------------------------------------------------------------------------------------------------------------------
