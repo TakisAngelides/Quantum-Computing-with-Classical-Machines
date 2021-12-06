@@ -1,5 +1,6 @@
 using LinearAlgebra
 using Test
+using Distributions
 
 @enum Form begin
     left
@@ -57,6 +58,50 @@ function initialize_MPS(N::Int64, d::Int64, D::Int64)::Vector{Array{ComplexF64}}
 
 end
 
+function inner_product_MPS(mps_1::Vector{Array{ComplexF64}}, mps_2::Vector{Array{ComplexF64}})::ComplexF64
+
+    """
+    Computes the inner product of two MPS as <mps_1|mps_2>
+
+    Note 1: See Schollwock equation (95)
+
+    Note 2: See my personal website for notes on this function and how the contractions are done in a specific order for efficiency.
+
+    Inputs:
+
+    mps_1 = The bra MPS state of the inner product (Vector)
+
+    mps_2 = The ket MPS state of the inner product (Vector)
+
+    Output:
+
+    result = The complex value of the inner product (Complex)
+    """
+
+    # Assert that the number of sites in each MPS are equal
+
+    N = length(mps_1)
+
+    @assert(N == length(mps_2), "The two MPS inputs do not have the same number of sites.")
+ 
+    # conj! takes the input to its complex conjugate not complex transpose. Also note the first contraction which happens 
+    # at the very left contracts the first index of the bra matrix with the first index of the ket matrix but these indices are 
+    # trivial and set to 1. It also contracts the physical indices of the two aforementioned matrices which gives a new non-trivial result.
+
+    result = contraction(conj!(deepcopy(mps_1[1])), (1, 3), mps_2[1], (1, 3)) # The reason we deepcopy is because mps_1 might point to mps_2 and conj! mutates the input as the ! suggests
+    
+    for i in 2:N
+
+        result = contraction(result, (2,), mps_2[i], (1,))
+
+        result = contraction(conj!(deepcopy(mps_1[i])), (1, 3), result, (1, 3))
+    
+    end
+    
+    return result[1] # results ends up being a 1x1 matrix that is why we index it with [1] to get its value
+        
+end
+
 function psi_0(N::Int64, d::Int64)::Array{ComplexF64}
 
     """
@@ -106,7 +151,7 @@ function psi_0_teleport(alpha::ComplexF64, beta::ComplexF64)::Array{ComplexF64}
     state[1,2,2] = (1/sqrt(2))*alpha
     state[2,1,1] = (1/sqrt(2))*beta
     state[2,2,2] = (1/sqrt(2))*beta
-
+        
     return state
 
 end
@@ -702,12 +747,11 @@ function get_CNOT_mpo(N::Int64, control_site::Int64, target_site::Int64)::Vector
 
 end
 
-function teleportation_protocol() # TODO: UNFINISHED FUNCTION
+function teleportation_protocol(alpha::ComplexF64, beta::ComplexF64)
 
     N = 3
-    d = 2
     
-    state = psi_0_teleport(0.5+0.0im, 0.5+0.0im)
+    state = psi_0_teleport(alpha, beta)
     mps = state_to_mps(state, N)
 
     # Now we perform the quantum circuit which represents the teleportation protocol
@@ -730,22 +774,31 @@ function teleportation_protocol() # TODO: UNFINISHED FUNCTION
 
     # Act with the last two gates after reading M1 and M2
 
-    # M1 = 1
-    # M2 = 1
+    if rand(Uniform(0, 1)) >= 0.5
+        M1 = 1
+    else
+        M1 = 0
+    end
 
-    # site = 3
-    # X_operator = X^M2
-    # X_mpo = get_single_qubit_gate_mpo(X_operator, N, site)
+    if rand(Uniform(0, 1)) >= 0.5
+        M2 = 1
+    else
+        M2 = 0
+    end
 
-    # Z_operator = Z^M1
-    # Z_mpo = get_single_qubit_gate_mpo(Z_operator, N, site)
+    site = 3
+    X_operator = X^M2
+    X_mpo = get_single_qubit_gate_mpo(X_operator, N, site)
 
-    # mps = act_mpo_on_mps(X_mpo, mps)
-    # mps = act_mpo_on_mps(Z_mpo, mps)
+    Z_operator = Z^M1
+    Z_mpo = get_single_qubit_gate_mpo(Z_operator, N, site)
 
-    # state = mps_to_state(mps, N)
+    mps = act_mpo_on_mps(X_mpo, mps)
+    mps = act_mpo_on_mps(Z_mpo, mps)
 
-    return state
+    state = mps_to_state(mps, N)
+
+    return 2*state[M1+1, M2+1, :]
 
 end
 
@@ -831,6 +884,21 @@ end
 # mps = act_mpo_on_mps(CNOT_mpo, mps)
 # state = mps_to_state(mps, N)
 # display(state)
+
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Performs the teleportation protocol for alpha = 0.7 and beta = 0.3
+
+# alpha = 0.3+0.0im
+# beta = sqrt(1-conj(alpha)*alpha)
+# println("We pretend we don't know beta before the protocol but its value is: ", beta)
+# state = teleportation_protocol(alpha, beta)
+# mps = state_to_mps(state, 1)
+# println("The final teleported state is: ")
+# display(state)
+# println("Alpha is: ", state[1])
+# println("Beta is: ", state[2])
+# display("The norm of the final state is: ", inner_product_MPS(mps, mps))
 
 # ---------------------------------------------------------------------------------------------------------------------
 
